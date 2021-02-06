@@ -13,7 +13,6 @@ class DecisionTreeGemm:
         tree = decision_tree.tree_
 
         is_internal_nodes = tree.children_left != tree.children_right
-        split_features_internal_nodes = tree.feature[is_internal_nodes]
         internal_nodes = np.flatnonzero(is_internal_nodes)
         leaf_nodes = np.flatnonzero(~is_internal_nodes)
         split_features_internal_nodes = tree.feature[internal_nodes]
@@ -35,6 +34,9 @@ class DecisionTreeGemm:
             path = compute_path(tree, leaf_idx)
 
             for i in range(len(path)):
+                # Apply transformation on index
+                # subset (internal nodes)
+                #      -> global (internal and leaf nodes)
                 path[i][0] = s_to_g(path[i][0])
 
             for node_idx, value in path:
@@ -82,4 +84,3 @@ class RandomForestGEMM:
     def predict(self, X):
         predictions = self.vote(X)
         return np.argmax(predictions, axis=1)
-        
