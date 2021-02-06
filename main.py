@@ -1,5 +1,4 @@
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-import torch.autograd.profiler as profiler
 
 def load_imdb_model():
     tokenizer = AutoTokenizer.from_pretrained("lvwerra/bert-imdb")
