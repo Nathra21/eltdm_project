@@ -9,11 +9,14 @@ class DecisionTreeGemm:
         decision_tree (sklearn DecisionTree)
     """
     
-    def __init__(self, decision_tree, backend="numpy"):
+    def __init__(self, decision_tree, backend="numpy", device="cpu"):
         """Create matrix A,B,C,D,E from decision_tree"""
         assert backend in ["numpy", "torch"]
         self.backend = backend
         self.back = np if backend == "numpy" else torch
+
+        assert device in ["cpu", "cuda"]
+        self.device = device
 
         tree = decision_tree.tree_
 
@@ -58,15 +61,18 @@ class DecisionTreeGemm:
             self.E[i,leaf_to_class[i]] = 1
         
         if backend == "torch":
-            self.A, self.B, self.C, self.D, self.E = map(torch.Tensor, (self.A, self.B, self.C, self.D, self.E))
+            self.A, self.B, self.C, self.D, self.E = map(
+                lambda x: torch.tensor(x, device=self.device, dtype=torch.float32),
+                (self.A, self.B, self.C, self.D, self.E)
+            )
     
     def _GEMM(self, X):
         """Implement GEMM Strategy"""
-        T = X.dot(self.A)
-        T = T < self.B
-        T = T.dot(self.C)
-        T = T == self.D
-        T = T.dot(self.E)
+        T = X @ self.A
+        T = (T < self.B).float()
+        T = T @ self.C
+        T = (T == self.D).float()
+        T = T @ self.E
         return T
 
     def predict(self, X):
@@ -79,18 +85,18 @@ class DecisionTreeGemm:
         return self._GEMM(X)
 
 class RandomForestGEMM:
-    def __init__(self, random_forest, backend):
+    def __init__(self, random_forest, backend="numpy", device="cpu"):
         """Create estimators from random_forest"""
         assert backend in ["numpy", "torch"]
         self.backend = backend
         self.back = np if backend == "numpy" else torch
 
-        self.trees = [DecisionTreeGemm(estimator, backend) for estimator in random_forest.estimators_]
+        self.trees = [DecisionTreeGemm(estimator, backend, device) for estimator in random_forest.estimators_]
         self.n_classes_ = random_forest.n_classes_
     
     def vote(self, X):
         """Count the vote from each tree for each data point"""
-        return self.back.sum([e.predict_onehot(X) for e in self.trees], axis=0)
+        return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
 
     def predict(self, X):
         predictions = self.vote(X)
