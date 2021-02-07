@@ -66,12 +66,18 @@ class DecisionTreeGemm:
                 (self.A, self.B, self.C, self.D, self.E)
             )
     
+    def convert_to_float(self, tensor):
+        if self.backend == "numpy":
+            return tensor.astype(np.float32)
+        else:
+            return tensor.float()
+
     def _GEMM(self, X):
         """Implement GEMM Strategy"""
         T = X @ self.A
-        T = (T < self.B).float()
+        T = self.convert_to_float(T < self.B)
         T = T @ self.C
-        T = (T == self.D).float()
+        T = self.convert_to_float(T == self.D)
         T = T @ self.E
         return T
 
