@@ -100,16 +100,54 @@ class RandomForestGEMM:
 
         self.trees = [DecisionTreeGemm(estimator, backend, device) for estimator in random_forest.estimators_]
         self.n_classes_ = random_forest.n_classes_
+        self.n_features_ = random_forest.n_features_
+
+        self.max_internal_nodes = 0
+        self.max_leaves_nodes = 0
+
+        for tree in self.trees:
+            self.max_internal_nodes = max(self.max_internal_nodes, tree.A.shape[1])
+            self.max_leaves_nodes = max(self.max_leaves_nodes, tree.C.shape[1])
+
+        self.n_trees = len(self.trees)
+        A_stacked = torch.zeros((self.n_trees, self.n_features_, self.max_internal_nodes), device="cuda")
+        B_stacked = torch.zeros((self.n_trees, self.max_internal_nodes), device="cuda")
+        C_stacked = torch.zeros((self.n_trees, self.max_internal_nodes, self.max_leaves_nodes), device="cuda")
+        D_stacked = torch.zeros((self.n_trees, self.max_leaves_nodes), device="cuda")
+        E_stacked = torch.zeros((self.n_trees, self.max_leaves_nodes, self.n_classes_), device="cuda")
+
+        for i, tree in enumerate(self.trees):
+            A_stacked[i, 0 : tree.A.shape[0], 0 : tree.A.shape[1]] = tree.A
+            B_stacked[i, 0 : tree.B.shape[0]] = tree.B
+            C_stacked[i, 0 : tree.C.shape[0], 0 : tree.C.shape[1]] = tree.C
+            D_stacked[i, 0 : tree.D.shape[0]] = tree.D
+            E_stacked[i, 0 : tree.E.shape[0], 0 : tree.E.shape[1]] = tree.E
+
+        self.A_stacked = A_stacked.reshape(self.n_features_, -1)
+        self.B_stacked = B_stacked.reshape(-1)
+        self.C_stacked = C_stacked
+        #self.C_stacked = C_stacked.reshape(len(self.trees)*max_internal_nodes, -1)
+        self.D_stacked = D_stacked.reshape(-1)
+        self.E_stacked = E_stacked
+        #self.E_stacked = E_stacked.reshape(max_leaves_nodes, -1)
     
     def vote(self, X):
         """Count the vote from each tree for each data point"""
-        #votes = self.back.empty(len(self.trees), X.shape[0], self.n_classes_)
-        #if self.backend == "torch":
-        #    votes = votes.to(self.device)
-        #for i, e in enumerate(self.trees):
-        #    votes[i, :, :] = e.predict_onehot(X)
-        #return votes.sum(axis=0)
-        return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
+        T = torch.mm(X, self.A_stacked)
+        T = T < self.B_stacked
+        T = T.reshape(self.n_trees, -1, self.max_internal_nodes)
+        T = T.float()
+
+        T = torch.matmul(T, self.C_stacked)
+        T = T.reshape(-1, self.n_trees * self.max_leaves_nodes)
+        T = T == self.D_stacked
+        T = T.reshape(self.n_trees, -1, self.max_leaves_nodes)
+        T = T.float()
+
+        T = torch.matmul(T, self.E_stacked)
+        T = T.sum(axis=0)
+        return T
+        #return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
 
     def predict(self, X):
         predictions = self.vote(X)
