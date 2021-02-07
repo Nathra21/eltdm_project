@@ -96,12 +96,19 @@ class RandomForestGEMM:
         assert backend in ["numpy", "torch"]
         self.backend = backend
         self.back = np if backend == "numpy" else torch
+        self.device = device
 
         self.trees = [DecisionTreeGemm(estimator, backend, device) for estimator in random_forest.estimators_]
         self.n_classes_ = random_forest.n_classes_
     
     def vote(self, X):
         """Count the vote from each tree for each data point"""
+        #votes = self.back.empty(len(self.trees), X.shape[0], self.n_classes_)
+        #if self.backend == "torch":
+        #    votes = votes.to(self.device)
+        #for i, e in enumerate(self.trees):
+        #    votes[i, :, :] = e.predict_onehot(X)
+        #return votes.sum(axis=0)
         return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
 
     def predict(self, X):
