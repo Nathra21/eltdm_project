@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from utils import compute_path
+from random_forest_pytorch.utils import compute_path
 
 class DecisionTreeGEMM:
     """Implementation proposed from `Taming Model Serving Complexity, Performance
