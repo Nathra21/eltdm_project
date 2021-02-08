@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from utils import compute_path
 
-class DecisionTreeGemm:
+class DecisionTreeGEMM:
     """Implementation proposed from `Taming Model Serving Complexity, Performance
     and Cost: A Compilation to Tensor Computations Approach`
     Args:
@@ -55,15 +55,16 @@ class DecisionTreeGemm:
         
         # Matrix E
         self.E = np.zeros(shape=(len(leaf_nodes), decision_tree.n_classes_))
-        leaf_to_class = tree.value[leaf_nodes].argmax(axis=-1).flatten()
+        self.probas = tree.value[leaf_nodes].reshape(-1,decision_tree.n_classes_)/np.sum(tree.value[leaf_nodes], axis=-1)
+        leaf_to_class = self.probas.argmax(axis=-1).flatten()
 
         for i in range(len(leaf_nodes)):
             self.E[i,leaf_to_class[i]] = 1
         
         if backend == "torch":
-            self.A, self.B, self.C, self.D, self.E = map(
+            self.A, self.B, self.C, self.D, self.E, self.probas = map(
                 lambda x: torch.tensor(x, device=self.device, dtype=torch.float32),
-                (self.A, self.B, self.C, self.D, self.E)
+                (self.A, self.B, self.C, self.D, self.E, self.probas)
             )
     
     def convert_to_float(self, tensor):
@@ -72,7 +73,7 @@ class DecisionTreeGemm:
         else:
             return tensor.float()
 
-    def _GEMM(self, X):
+    def GEMM(self, X):
         """Implement GEMM Strategy"""
         T = X @ self.A
         T = self.convert_to_float(T < self.B)
@@ -83,12 +84,12 @@ class DecisionTreeGemm:
 
     def predict(self, X):
         """Return class (integer) for each data point"""
-        T = self._GEMM(X)
+        T = self.GEMM(X)
         return self.back.argmax(T, axis=1)
     
     def predict_onehot(self, X):
         """One Hot Encoding version of self.predict"""
-        return self._GEMM(X)
+        return self.GEMM(X)
 
 class RandomForestGEMM:
     def __init__(self, random_forest, backend="numpy", device="cpu"):
@@ -98,7 +99,7 @@ class RandomForestGEMM:
         self.back = np if backend == "numpy" else torch
         self.device = device
 
-        self.trees = [DecisionTreeGemm(estimator, backend, device) for estimator in random_forest.estimators_]
+        self.trees = [DecisionTreeGEMM(estimator, backend, device) for estimator in random_forest.estimators_]
         self.n_classes_ = random_forest.n_classes_
         self.n_features_ = random_forest.n_features_
 
@@ -110,11 +111,12 @@ class RandomForestGEMM:
             self.max_leaves_nodes = max(self.max_leaves_nodes, tree.C.shape[1])
 
         self.n_trees = len(self.trees)
-        A_stacked = torch.zeros((self.n_trees, self.n_features_, self.max_internal_nodes), device="cuda")
-        B_stacked = torch.zeros((self.n_trees, self.max_internal_nodes), device="cuda")
-        C_stacked = torch.zeros((self.n_trees, self.max_internal_nodes, self.max_leaves_nodes), device="cuda")
-        D_stacked = torch.zeros((self.n_trees, self.max_leaves_nodes), device="cuda")
-        E_stacked = torch.zeros((self.n_trees, self.max_leaves_nodes, self.n_classes_), device="cuda")
+        A_stacked = self.back.zeros((self.n_trees, self.n_features_, self.max_internal_nodes))
+        B_stacked = self.back.zeros((self.n_trees, self.max_internal_nodes))
+        C_stacked = self.back.zeros((self.n_trees, self.max_internal_nodes, self.max_leaves_nodes))
+        D_stacked = self.back.zeros((self.n_trees, self.max_leaves_nodes))
+        E_stacked = self.back.zeros((self.n_trees, self.max_leaves_nodes, self.n_classes_))
+        probas_stacked = self.back.zeros((self.n_trees, self.max_leaves_nodes, self.n_classes_))
 
         for i, tree in enumerate(self.trees):
             A_stacked[i, 0 : tree.A.shape[0], 0 : tree.A.shape[1]] = tree.A
@@ -122,32 +124,49 @@ class RandomForestGEMM:
             C_stacked[i, 0 : tree.C.shape[0], 0 : tree.C.shape[1]] = tree.C
             D_stacked[i, 0 : tree.D.shape[0]] = tree.D
             E_stacked[i, 0 : tree.E.shape[0], 0 : tree.E.shape[1]] = tree.E
+            probas_stacked[i, 0 : tree.probas.shape[0], 0 : tree.probas.shape[1]] = tree.probas
 
-        self.A_stacked = A_stacked.reshape(self.n_features_, -1)
+
+        self.A_stacked = self.back.hstack([A for A in A_stacked])
         self.B_stacked = B_stacked.reshape(-1)
         self.C_stacked = C_stacked
-        #self.C_stacked = C_stacked.reshape(len(self.trees)*max_internal_nodes, -1)
         self.D_stacked = D_stacked.reshape(-1)
         self.E_stacked = E_stacked
-        #self.E_stacked = E_stacked.reshape(max_leaves_nodes, -1)
-    
+        self.probas_stacked = probas_stacked
+
+        if backend == "torch":
+            self.A_stacked, self.B_stacked, self.C_stacked, self.D_stacked, self.E_stacked, self.probas_stacked = map(
+                lambda x: x.to(self.device).float(),
+                (self.A_stacked, self.B_stacked, self.C_stacked, self.D_stacked, self.E_stacked, self.probas_stacked)
+            )
+
+    def convert_to_float(self, tensor):
+        if self.backend == "numpy":
+            return tensor.astype(np.float32)
+        else:
+            return tensor.float()
+
+    def permute(self, x, *dims):
+        if self.backend == "numpy":
+            return x.transpose(*dims)
+        else:
+            return x.permute(*dims)
+
     def vote(self, X):
         """Count the vote from each tree for each data point"""
-        T = torch.mm(X, self.A_stacked)
-        T = T < self.B_stacked
-        T = T.reshape(self.n_trees, -1, self.max_internal_nodes)
-        T = T.float()
+        T = X@self.A_stacked
+        T = self.convert_to_float(T < self.B_stacked)
+        T = T.reshape(-1, self.n_trees, self.max_internal_nodes)
+        T = self.permute(T,1,0,2)
 
-        T = torch.matmul(T, self.C_stacked)
+        T = T@self.C_stacked
         T = T.reshape(-1, self.n_trees * self.max_leaves_nodes)
-        T = T == self.D_stacked
+        T = self.convert_to_float(T == self.D_stacked)
         T = T.reshape(self.n_trees, -1, self.max_leaves_nodes)
-        T = T.float()
 
-        T = torch.matmul(T, self.E_stacked)
+        T = T@self.probas_stacked
         T = T.sum(axis=0)
         return T
-        #return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
 
     def predict(self, X):
         predictions = self.vote(X)
