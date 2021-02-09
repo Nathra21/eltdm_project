@@ -91,6 +91,25 @@ class DecisionTreeGEMM:
         """One Hot Encoding version of self.predict"""
         return self.GEMM(X)
 
+class NaiveRandomForestGEMM:
+    def __init__(self, random_forest, backend="numpy", device="cpu"):
+        """Create estimators from random_forest"""
+        assert backend in ["numpy", "torch"]
+        self.backend = backend
+        self.back = np if backend == "numpy" else torch
+        self.device = device
+
+        self.trees = [DecisionTreeGEMM(estimator, backend, device) for estimator in random_forest.estimators_]
+        self.n_classes_ = random_forest.n_classes_
+    
+    def vote(self, X):
+        """Count the vote from each tree for each data point"""
+        return self.back.stack([e.predict_onehot(X) for e in self.trees]).sum(axis=0)
+
+    def predict(self, X):
+        predictions = self.vote(X)
+        return self.back.argmax(predictions, axis=1)
+
 class RandomForestGEMM:
     def __init__(self, random_forest, backend="numpy", device="cpu"):
         """Create estimators from random_forest"""
