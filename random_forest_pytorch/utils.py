@@ -1,9 +1,15 @@
-import numpy as np
-import pandas as pd
-
-import torch
 import re
 import os
+import timeit
+import sys
+
+import numpy as np
+import pandas as pd
+import torch
+
+from sklearn.tree import plot_tree
+from matplotlib import pyplot as plt
+
 
 def compute_path(tree, k):
     """Compute path from nodes (leaf or internal) to root.
@@ -27,7 +33,6 @@ def compute_path(tree, k):
             l.append([parent_right[0], -1])
 
     return l[1:]
-
 
 def read_text_file(path, encoding="utf-8", lines=False):
     with open(path, "r", encoding=encoding) as file:
@@ -74,3 +79,78 @@ def profile_command(func):
     ]).rename(columns=lambda x: x.split("_")[1] if "self_" in x else x)
 
     return pdf
+
+def plot_decision_tree(tree):
+    plt.subplots(figsize=(10, 10))
+    plot_tree(tree, fontsize=12, filled=True, impurity=False)
+
+def format_time(timespan, precision=3):
+    """Formats the timespan in a human readable form.
+    Copied from IPython source.
+    """
+
+    if timespan >= 60.0:
+        # we have more than a minute, format that in a human readable form
+        # Idea from http://snipplr.com/view/5713/
+        parts = [("d", 60*60*24),("h", 60*60),("min", 60), ("s", 1)]
+        time = []
+        leftover = timespan
+        for suffix, length in parts:
+            value = int(leftover / length)
+            if value > 0:
+                leftover = leftover % length
+                time.append(u'%s%s' % (str(value), suffix))
+            if leftover < 1:
+                break
+        return " ".join(time)
+
+    
+    # Unfortunately the unicode 'micro' symbol can cause problems in
+    # certain terminals.  
+    # See bug: https://bugs.launchpad.net/ipython/+bug/348466
+    # Try to prevent crashes by being more secure than it needs to
+    # E.g. eclipse is able to print a µ, but has no sys.stdout.encoding set.
+    units = [u"s", u"ms",u'us',"ns"] # the save value   
+    if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding:
+        try:
+            u'\xb5'.encode(sys.stdout.encoding)
+            units = [u"s", u"ms",u'\xb5s',"ns"]
+        except:
+            pass
+    scaling = [1, 1e3, 1e6, 1e9]
+        
+    if timespan > 0.0:
+        order = min(-int(np.floor(np.log10(timespan)) // 3), 3)
+    else:
+        order = 3
+    return u"%.*g %s" % (precision, timespan * scaling[order], units[order])
+
+def get_all_backends(constructor, *args, **kwargs):
+    return {
+        "numpy": constructor(*args, backend="numpy", **kwargs),
+        "torch_cpu": constructor(*args, backend="torch", device="cpu", **kwargs),
+        "torch_cuda": constructor(*args, backend="torch", device="cuda", **kwargs),
+    }
+
+def time_all_backends(models, X, number=1000, repeat=7):
+    # Pour bien comparer les trois backends, il faut avoir préparé à l'avance leurs inputs.
+    Xs = {
+        "numpy": X,
+        "torch_cpu": torch.tensor(X).float(),
+        "torch_cuda": torch.tensor(X).float().cuda()
+    }
+
+    backends = Xs.keys()
+    assert backends == models.keys()
+
+    out = {}
+    for backend in backends:
+        times = np.array(timeit.repeat(lambda: models[backend].predict(Xs[backend]), number=number, repeat=repeat)) / number
+        out[backend] = (times.mean(), times.std())
+    
+    return out
+
+def pretty_print_time_all_backends(models, X, number=1000, repeat=7):
+    times = time_all_backends(models, X, number, repeat)
+    for backend, (mu, std) in times.items():
+        print(backend.ljust(10), "->", format_time(mu), "±", format_time(std))
