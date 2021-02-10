@@ -83,7 +83,7 @@ def profile_command(func):
 
 def plot_decision_tree(tree):
     plt.subplots(figsize=(10, 10))
-    plot_tree(tree, fontsize=12, filled=True, impurity=False)
+    plot_tree(tree, fontsize=12, filled=True, impurity=False, node_ids=True)
 
 def make_complex_dataset(n_samples):
     X_1, y_1 = make_circles(n_samples=n_samples//3, factor=0.6)
@@ -172,7 +172,8 @@ def time_all_backends(models, X, number=1000, repeat=7, return_std=True):
 
     out = {}
     for backend in backends:
-        times = np.array(timeit.repeat(lambda: models[backend].predict(Xs[backend]), number=number, repeat=repeat)) / number
+        func = lambda: models[backend].predict(Xs[backend])
+        times = np.array(timeit.repeat(func, number=number, repeat=repeat)) / number
         if return_std:
             out[backend] = (times.mean(), times.std())
         else:
