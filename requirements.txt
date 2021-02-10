@@ -1,4 +1,5 @@
 numpy
+tqdm
 torch
 scikit-learn
 Hummingbird
