@@ -20,7 +20,7 @@ Notre étude s'intéresse à la réduction du temps de prédiction d'une RandomF
 
 Notre rapport est disponible au format Jupyter Notebook ainsi qu'en PDF.
 L'implémentation principale de la RandomForest sous ``numpy`` et ``pytorch`` se trouve dans le fichier ``random_forest_gemm.py``.
-Les fonctions auxiliaires utilisées pour le rapport sont regroupées dans ``utils.py``.
+Les fonctions auxiliaires utilisées pour le rapport et l'implémentation sont regroupées dans ``utils.py``.
 
 Enfin, la liste des packages nécessaires à l'exécution de notre implémentation est disponible dans
 ``requirements.txt`` et des tests sont disponibles pour vérifier que les prédictions de notre implémentation
