@@ -1,5 +1,6 @@
-numpy==1.18.5
-torch==1.4.0
-scikit-learn==0.23.2
-Hummingbird==0.0.3
-hummingbird-ml==0.2.1
+numpy
+torch
+scikit-learn
+Hummingbird
+hummingbird-ml
+pytest
