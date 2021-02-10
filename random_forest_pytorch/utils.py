@@ -8,8 +8,9 @@ import pandas as pd
 import torch
 
 from sklearn.tree import plot_tree
+from sklearn.datasets import make_circles
 from matplotlib import pyplot as plt
-
+from hummingbird.ml import convert
 
 def compute_path(tree, k):
     """Compute path from nodes (leaf or internal) to root.
@@ -84,6 +85,17 @@ def plot_decision_tree(tree):
     plt.subplots(figsize=(10, 10))
     plot_tree(tree, fontsize=12, filled=True, impurity=False)
 
+def make_complex_dataset(n_samples):
+    X_1, y_1 = make_circles(n_samples=n_samples//3, factor=0.6)
+    X_2, y_2 = make_circles(n_samples=n_samples//3, factor=0.8)
+    X_3, y_3 = make_circles(n_samples=n_samples//3, factor=0.9)
+    X_2 *= 1.5
+    X_3 *= 2
+    X = np.concatenate([X_1, X_2, X_3])
+    y = np.concatenate([y_1, y_2, y_3])
+    return X, y
+
+
 def format_time(timespan, precision=3):
     """Formats the timespan in a human readable form.
     Copied from IPython source.
@@ -123,34 +135,52 @@ def format_time(timespan, precision=3):
         order = min(-int(np.floor(np.log10(timespan)) // 3), 3)
     else:
         order = 3
-    return u"%.*g %s" % (precision, timespan * scaling[order], units[order])
+    # return u"%.*g %s" % (precision, timespan * scaling[order], units[order])
+    return f"{timespan*scaling[order]:>{precision+1}.{precision}g} {units[order]}"
 
-def get_all_backends(constructor, *args, **kwargs):
-    return {
-        "numpy": constructor(*args, backend="numpy", **kwargs),
-        "torch_cpu": constructor(*args, backend="torch", device="cpu", **kwargs),
-        "torch_cuda": constructor(*args, backend="torch", device="cuda", **kwargs),
-    }
+def get_all_backends(constructor, clf, include_sklearn=True, include_hummingbird=False, **kwargs):
+    out = {}
+    
+    if include_sklearn:
+        out["sklearn"] = clf
 
-def time_all_backends(models, X, number=1000, repeat=7):
+    out.update({
+        "numpy": constructor(clf, backend="numpy", **kwargs),
+        "torch_cpu": constructor(clf, backend="torch", device="cpu", **kwargs),
+        "torch_cuda": constructor(clf, backend="torch", device="cuda", **kwargs),
+    })
+
+    if include_hummingbird:
+        out["hummingbird_cpu"] = convert(clf, "pytorch")
+        out["hummingbird_cuda"] = convert(clf, "pytorch").to("cuda")
+    
+    return out
+
+def time_all_backends(models, X, number=1000, repeat=7, return_std=True):
     # Pour bien comparer les trois backends, il faut avoir préparé à l'avance leurs inputs.
     Xs = {
+        "sklearn": X,
         "numpy": X,
         "torch_cpu": torch.tensor(X).float(),
-        "torch_cuda": torch.tensor(X).float().cuda()
+        "torch_cuda": torch.tensor(X).float().cuda(),
     }
+    Xs["hummingbird_cpu"] = Xs["torch_cpu"]
+    Xs["hummingbird_cuda"] = Xs["torch_cuda"]
 
-    backends = Xs.keys()
-    assert backends == models.keys()
+    backends = models.keys()
+    assert set(backends) <= set(Xs), "Some model keys are not in the standard backends."
 
     out = {}
     for backend in backends:
         times = np.array(timeit.repeat(lambda: models[backend].predict(Xs[backend]), number=number, repeat=repeat)) / number
-        out[backend] = (times.mean(), times.std())
+        if return_std:
+            out[backend] = (times.mean(), times.std())
+        else:
+            out[backend] = times.mean()
     
     return out
 
 def pretty_print_time_all_backends(models, X, number=1000, repeat=7):
     times = time_all_backends(models, X, number, repeat)
     for backend, (mu, std) in times.items():
-        print(backend.ljust(10), "->", format_time(mu), "±", format_time(std))
+        print(backend.ljust(17), "->", format_time(mu), "±", format_time(std))
