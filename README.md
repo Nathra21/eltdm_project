@@ -3,7 +3,12 @@
 ## Mise en place de l'environnement
 
 Il est possible d'avoir un environnement Jupyter avec GPU en utilisant Docker.
-Voir [ce repository](https://github.com/iot-salzburg/gpu-jupyter)
+Voir [ce repository](https://github.com/iot-salzburg/gpu-jupyter).
+
+Pour installer les packages,
+```bash
+pip3 install -r requirements.txt
+```
 
 ## Exécution des tests
 

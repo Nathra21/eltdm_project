@@ -149,7 +149,7 @@ class RandomForestGEMM:
         self.A_stacked = self.back.hstack([A for A in A_stacked])
         self.B_stacked = B_stacked.reshape(-1)
         self.C_stacked = C_stacked
-        self.D_stacked = D_stacked.reshape(-1)
+        self.D_stacked = D_stacked[:,None,:]
         self.E_stacked = E_stacked
         self.probas_stacked = probas_stacked
 
@@ -179,13 +179,15 @@ class RandomForestGEMM:
         T = self.permute(T,1,0,2)
 
         T = T@self.C_stacked
-        T = T.reshape(-1, self.n_trees * self.max_leaves_nodes)
         T = self.convert_to_float(T == self.D_stacked)
-        T = T.reshape(self.n_trees, -1, self.max_leaves_nodes)
 
         T = T@self.probas_stacked
         T = T.sum(axis=0)
         return T
+
+    def predict_proba(self, X):
+        predictions = self.vote(X)/self.n_trees
+        return predictions
 
     def predict(self, X):
         predictions = self.vote(X)
